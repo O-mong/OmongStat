@@ -1,0 +1,1 @@
+Wordpress plugin made with React Typescript.
