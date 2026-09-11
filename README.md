@@ -1,1 +1,1 @@
-Wordpress plugin made with React Typescript.
+Simple statistic wordpress plugin made with React-Typescript
