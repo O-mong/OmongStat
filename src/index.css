@@ -1,0 +1,76 @@
+#omongstat-root .omongstat {
+  max-width: 1500px;
+  color: #1d2327;
+}
+#omongstat-root section {
+  background: white;
+  border: 1px solid #dcdcde;
+  border-radius: 6px;
+  padding: 18px;
+  margin: 16px 0;
+  min-width: 0;
+}
+#omongstat-root h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+}
+#omongstat-root .omongstat-filters {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+}
+#omongstat-root .omongstat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+}
+#omongstat-root strong {
+  font-size: 28px;
+  color: #135e96;
+}
+#omongstat-root .omongstat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 16px;
+}
+#omongstat-root table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+#omongstat-root td,
+#omongstat-root th {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+  overflow-wrap: anywhere;
+}
+#omongstat-root .omongstat-error {
+  border-left: 4px solid #d63638;
+  background: #fff;
+  padding: 16px;
+}
+#omongstat-root .omongstat-chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  overflow-x: auto;
+  min-height: 170px;
+}
+#omongstat-root .omongstat-chart > div {
+  min-width: 32px;
+  flex: 1;
+  text-align: center;
+}
+#omongstat-root .omongstat-chart span {
+  display: block;
+  background: #2271b1;
+  border-radius: 3px 3px 0 0;
+}
+#omongstat-root small {
+  font-size: 10px;
+}
+#omongstat-root .omongstat-scroll {
+  overflow: auto;
+}

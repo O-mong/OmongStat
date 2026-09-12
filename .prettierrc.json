@@ -1,0 +1,16 @@
+{
+  "singleQuote": true,
+  "semi": false,
+  "printWidth": 100,
+  "plugins": ["@prettier/plugin-php"],
+  "overrides": [
+    {
+      "files": "*.php",
+      "options": {
+        "tabWidth": 4,
+        "phpVersion": "8.0",
+        "braceStyle": "per-cs"
+      }
+    }
+  ]
+}

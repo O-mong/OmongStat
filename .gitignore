@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Generated admin bundle and build caches
+/wordpress_plugins/omongstat/assets/admin/
+.vite/
+*.tsbuildinfo
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# Local environment configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+PROCEDURE.md

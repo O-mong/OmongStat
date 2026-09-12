@@ -1,0 +1,29 @@
+{
+  "name": "omongstat",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "format": "prettier --write \"src/**/*.{ts,tsx,css}\" \"wordpress_plugins/omongstat/**/*.php\" \"wordpress_plugins/omongstat/assets/js/*.js\" \"scripts/*.mjs\" \"tests/*.{mjs,php}\" vite.config.ts",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css}\" \"wordpress_plugins/omongstat/**/*.php\" \"wordpress_plugins/omongstat/assets/js/*.js\" \"scripts/*.mjs\" \"tests/*.{mjs,php}\" vite.config.ts"
+  },
+  "dependencies": {
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@prettier/plugin-php": "^0.25.0",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "oxlint": "^1.81.0",
+    "prettier": "^3.9.6",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0"
+  }
+}

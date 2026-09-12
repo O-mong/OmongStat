@@ -1,0 +1,4 @@
+node_modules/
+dist/
+wordpress_plugins/omongstat/assets/admin/
+PROCEDURE.md
