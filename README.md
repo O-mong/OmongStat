@@ -1,1 +1,0 @@
-Simple statistic wordpress plugin made with React-Typescript
