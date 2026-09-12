@@ -4,6 +4,9 @@
 
 **Your WordPress traffic, in your WordPress dashboard.**
 
+<img width="1605" height="871" alt="image" src="https://github.com/user-attachments/assets/7e268487-0da4-4493-9d4f-94ad0ef08a81" />
+
+
 Pageviews · Visitors · Referrers · Devices
 
 [Installation](#installation) · [First visit](#check-your-first-visit) · [Settings](#settings)
