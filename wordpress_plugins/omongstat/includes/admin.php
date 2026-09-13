@@ -22,6 +22,11 @@ function omongstat_register_admin_menu(): void
 
 function omongstat_register_settings(): void
 {
+    register_setting('omongstat', 'omongstat_retention_days', [
+        'type' => 'integer',
+        'sanitize_callback' => fn($value) => max(0, min(3650, (int) $value)),
+        'default' => 0,
+    ]);
     $defaults = [
         'omongstat_exclude_admin' => true,
         'omongstat_delete_on_uninstall' => false,
@@ -41,19 +46,24 @@ function omongstat_admin_assets(): ?array
     $build_directory = OMONSTAT_DIR . 'assets/admin/';
     $manifest_path = $build_directory . '.vite/manifest.json';
 
-    if (!is_file($manifest_path)) {
+    if (!omongstat_safe_asset('.vite/manifest.json')) {
         return null;
     }
 
     $manifest = json_decode(file_get_contents($manifest_path), true);
     $entry = $manifest['src/main.tsx'] ?? null;
 
-    if (!$entry || !is_file($build_directory . $entry['file'])) {
+    if (
+        !is_array($entry) ||
+        !is_string($entry['file'] ?? null) ||
+        !omongstat_safe_asset($entry['file']) ||
+        !is_array($entry['css'] ?? [])
+    ) {
         return null;
     }
 
     foreach ($entry['css'] ?? [] as $stylesheet) {
-        if (!is_file($build_directory . $stylesheet)) {
+        if (!is_string($stylesheet) || !omongstat_safe_asset($stylesheet)) {
             return null;
         }
     }
@@ -152,6 +162,15 @@ function omongstat_admin_page(): void
                         </label>
                     </p>
                 <?php endforeach; ?>
+                <p>
+                    <label>Event retention (days; 0 keeps all events)
+                        <input type="number" name="omongstat_retention_days" min="0" max="3650"
+                            value="<?php echo esc_attr(
+                                get_option('omongstat_retention_days', 0),
+                            ); ?>">
+                    </label>
+                    <br>Setting a positive value permanently deletes older events in background batches.
+                </p>
                 <?php submit_button('Save settings'); ?>
             </form>
         </details>

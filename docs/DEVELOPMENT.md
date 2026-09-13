@@ -1,5 +1,7 @@
 # Development and operations
 
+For the detailed security change log, defaults, upgrade procedure, and recorded verification results, see the [1.2.0 update notes](updates/1.2.0.md).
+
 WordPress의 MariaDB에 페이지뷰를 저장하고 WordPress 관리자 **Analytics** 메뉴에서 React 통계를 표시하는 플러그인입니다. 별도 백엔드나 운영 Node.js 서버가 필요하지 않습니다.
 
 ## 코드 구성과 포맷
@@ -25,20 +27,22 @@ npm run format:check
 Docker 개발 환경 배포:
 
 ```sh
-bash wordpress_plugins/omongstat/deploy-plugin.sh --build
+bash wordpress_plugins/omongstat/deploy-plugin.sh
 ```
 
-기본 컨테이너는 `wordpress-web`이며 `WORDPRESS_CONTAINER`로 변경할 수 있습니다. 설치 경로는 `/var/www/html/wp-content/plugins/omongstat`입니다. 스크립트는 staging 전송과 collector·manifest·JS/CSS 검증 후 교체합니다. 이전 설치본은 출력되는 `.omongstat.stage.*.previous` 경로에 남기고 교체 실패 시 복구합니다. 동시 배포는 잠금 디렉터리로 차단합니다. 처음 설치했다면 WordPress 관리자에서 활성화하세요.
+배포 스크립트는 매번 `npm run build`로 React 정적 파일을 생성합니다. 빌드 실패 시 오류와 종료 코드를 출력하고 업로드를 중단하여 기존 설치본을 보존합니다. 기존 `--build` 옵션도 호환됩니다.
+
+기본 컨테이너는 `wordpress-web`이며 `WORDPRESS_CONTAINER`로 변경할 수 있습니다. 설치 경로는 `/var/www/html/wp-content/plugins/omongstat`입니다. 스크립트는 staging 전송과 collector·manifest·JS/CSS 검증 후 교체합니다. 이전 설치본은 웹 루트 밖 `/var/backups/omongstat/` 아래에 남기고 교체 실패 시 복구합니다. 동시 배포는 잠금 디렉터리로 차단합니다. 처음 설치했다면 WordPress 관리자에서 활성화하세요.
 
 ## 수집과 통계
 
-공개 페이지에서 페이지당 한 번 `POST /wp-json/omongstat/v1/collect`로 JSON을 보냅니다. 정상 요청은 본문 없는 204, 잘못된 값은 400 또는 413, DB 실패는 500입니다. 개발 시 `WP_DEBUG`가 켜져 있으면 collector 전송 오류가 콘솔에 표시됩니다. Beacon의 `true`는 브라우저가 전송을 접수했다는 의미이며 서버 저장 성공을 보장하지 않습니다.
+공개 페이지에서 페이지당 한 번 `POST /wp-json/omongstat/v1/collect`로 JSON을 보냅니다. 정상 요청은 본문 없는 204, 잘못된 값은 400 또는 413, 허용되지 않은 Origin은 403, 요청 한도 초과는 429, 이벤트 DB 실패는 500, 제한 카운터 저장소 장애는 503입니다. 개발 시 `WP_DEBUG`가 켜져 있으면 collector 전송 오류가 콘솔에 표시됩니다. Beacon의 `true`는 브라우저가 전송을 접수했다는 의미이며 서버 저장 성공을 보장하지 않습니다.
 
 수집 필드: 내부 `path`(쿼리·fragment 제외, 최대 2048바이트), 정수 `postId`, `referrer`(최대 4096바이트), `visitorId`·`sessionId`(영문/숫자/밑줄/하이픈 16–64자), `language`(64바이트), `timezone`(128바이트), 정수 `screenWidth`·`screenHeight`(0–65535), `eventType: pageview`. 식별자는 localStorage/sessionStorage에 유지하고 차단된 환경에서는 해당 페이지에서만 사용할 ID를 생성합니다. 브라우저의 sessionStorage 복제 동작에 따라 복제 탭이 처음에는 같은 세션 ID를 가질 수 있습니다.
 
 IP는 서버에서 읽어 `wp_salt('auth')`를 키로 HMAC-SHA256 해시만 저장합니다. 원본 UA는 저장하고 브라우저·OS·기기·봇 추정치를 가볍게 분류합니다. 실시간 봇 페이지뷰는 포함하여 분류하고 로그 importer는 명백한 봇을 제외합니다. 화면 크기나 국가 등 정보가 없으면 통계에서 Unknown 또는 미집계로 나타납니다.
 
-Analytics 하단 설정에서 관리자 방문 제외(기본 켜짐)와 제거 시 데이터 삭제(기본 꺼짐)를 변경할 수 있습니다. 비활성화 시 데이터는 삭제하지 않습니다. 제거 시 삭제 옵션이 켜진 경우만 이벤트 테이블과 플러그인 옵션을 삭제합니다. 현재 설치·제거 처리는 사이트 단위이며 멀티사이트 네트워크 일괄 배포는 지원 범위에 포함하지 않습니다.
+Analytics 하단 설정에서 관리자 방문 제외(기본 켜짐)와 제거 시 데이터 삭제(기본 꺼짐)를 변경할 수 있습니다. 비활성화 시 데이터는 삭제하지 않습니다. 제거 시 삭제 옵션이 켜진 경우만 이벤트·요청 제한 테이블과 플러그인 옵션을 삭제합니다. 보존 기간은 기본 0(전체 보존)이며, 양수로 설정하면 오래된 이벤트를 백그라운드에서 영구 삭제합니다. 현재 설치·제거 처리는 사이트 단위이며 멀티사이트 네트워크 일괄 배포는 지원 범위에 포함하지 않습니다.
 
 ### 신뢰할 프록시 설정
 
@@ -68,7 +72,7 @@ add_filter('omongstat_trusted_proxies', function () {
 
 ## DB 업그레이드
 
-플러그인 코드 버전과 `omongstat_schema_version`은 별도로 관리합니다. 신규 설치와 업데이트 시 필요한 컬럼·인덱스를 확인하고 migration을 실행합니다. 이전 `occured_at` 컬럼은 명시적으로 `occurred_at`으로 변경합니다. 두 컬럼에 서로 다른 날짜가 있으면 값을 삭제하지 않고 migration을 중단하여 로그와 관리자 오류를 표시합니다. 원본 DB를 백업한 뒤 충돌값을 확인·정리하고 다음 요청에서 재시도하세요. 과거 `path = 0` 데이터는 원래 경로를 복원할 수 없으므로 임의로 바꾸지 않습니다. 기존 UA는 배치로 분류하고 없는 방문자 ID 등을 만들어내지 않습니다.
+플러그인 코드 버전과 `omongstat_schema_version`은 별도로 관리합니다. 신규 설치와 업데이트 시 필요한 컬럼·인덱스를 확인하고 migration을 실행합니다. 이전 `occured_at` 컬럼은 명시적으로 `occurred_at`으로 변경합니다. 두 컬럼에 서로 다른 날짜가 있으면 값을 삭제하지 않고 migration을 중단하여 로그와 관리자 오류를 표시합니다. 원본 DB를 백업한 뒤 충돌값을 확인·정리하세요. 실패 후 5분의 재시도 대기 시간이 있으며, 관리자 요청 또는 예약 작업에서 다시 시도합니다. 과거 `path = 0` 데이터는 원래 경로를 복원할 수 없으므로 임의로 바꾸지 않습니다. 기존 UA는 배치로 분류하고 없는 방문자 ID 등을 만들어내지 않습니다.
 
 ## 과거 access log 가져오기
 
@@ -136,4 +140,55 @@ docker exec wordpress-web php /tmp/omongstat-verification/tests/live-smoke.php
 
 이 검사는 컨테이너 내부 Apache에 요청하여 collector·React JS·Autoptimize 번들 200, 설정 순서, collect 204, DB 증가, 400/403 및 캐시 헤더를 확인합니다. 자체 생성한 식별자로 저장된 테스트 이벤트만 마지막에 삭제합니다. 프록시/CDN 경유 검증이나 브라우저에서의 최종 시각 확인을 대체하지 않습니다.
 
-2026-09-12 검증 결과: React 빌드·lint 통과, collector 회귀 테스트 통과, 배포 성공/검증 실패/교체 실패 복구 테스트 3개 통과, WordPress/MariaDB 통합 검사 49개 통과, 배포 후 HTTP 검사 13개 통과. 기존 이벤트 3건은 유지했습니다. 브라우저 UI 시각 검증과 Cloudflare 외부 경로 검증은 수행하지 않았습니다.
+
+## Local sample API
+
+Run `npm run dev` to serve sample responses at the same `/wp-json/omongstat/v1/` paths used by WordPress. The Vite plugin supplies the WordPress configuration and mount ID in development HTML; React components, the entry point, and the existing fetch layer are unchanged.
+
+- `dev/mockApi.ts` provides read-only endpoints through Vite middleware, enabled only for development.
+- `dev/sampleData.ts` creates 90 days of in-memory sample events. No database, separate server, or persistence is needed.
+- All seven statistics endpoints support `start` and `end` dates. Plain `?rest_route=` URLs are also supported.
+- The default is normal data. Use `OMONGSTAT_MOCK_SCENARIO=empty npm run dev`, `error`, or `slow` to change the server response. Normal takes 150 ms; slow takes 3 seconds; error returns HTTP 500.
+- For an individual request, append `mock=empty`, `mock=error`, or `mock=slow` to its query parameters. There are no additional UI controls.
+- Restart Vite after a UTC date change to refresh the sample history.
+
+```sh
+curl 'http://localhost:5173/wp-json/omongstat/v1/stats/summary'
+curl 'http://localhost:5173/wp-json/omongstat/v1/events/recent?mock=empty'
+node tests/mock-api.test.mjs
+```
+
+The production plugin build does not include the mock middleware or sample events.
+
+## Security controls (1.2.0)
+
+The React UI and chart selection are unchanged. The PHP and packaging protections below are enabled by default.
+
+- Collection is limited to **120 requests per IP per minute** and **3,000 requests per site per minute**. A shared MariaDB table performs atomic counter updates; it stores HMAC bucket keys, not raw IPs. Expired buckets are removed incrementally. Limits use fixed minute windows, so boundary bursts are possible.
+- Exceeding a limit returns **429** and `Retry-After`. Unavailable limit storage returns **503** without inserting an event. This limits DB writes; it does not replace upstream denial-of-service protection. All clients behind an unconfigured reverse proxy share its IP budget.
+- Requests with an explicitly foreign or opaque `Origin` return **403**. Missing Origin remains supported for privacy clients. These checks do not authenticate visitors or make anonymous statistics impossible to forge.
+- The default origins come from WordPress `home_url()` and `site_url()`. Ensure those URLs use the correct public HTTPS scheme behind your proxy. Extra controlled origins can be configured with `omongstat_allowed_origins`.
+- `omongstat_rate_limits` can tune the `ip` and `site` minute budgets. Configure `omongstat_trusted_proxies` only when those proxies overwrite untrusted forwarding headers.
+- Referrers retain scheme, host, port and path only. Credentials, queries and fragments are removed in both collection and log imports. Existing rows are scrubbed in background batches; statistics responses also strip these fields before returning old rows. Sensitive information embedded in URL paths cannot be identified automatically.
+- Plugin-generated DB failure logs contain an operation and keyed fingerprint instead of raw SQL or request fields. Keep WordPress `WP_DEBUG_DISPLAY` disabled in production; other plugins/core can have their own logging policies.
+- Schema upgrades run on activation, administrator requests or a scheduled job, not inline on every public page. Failed upgrades back off for five minutes. Background cleanup saves a cursor and handles at most **250 rows** per run. Sites with disabled WP-Cron must invoke WordPress cron through their scheduler.
+- **Event retention defaults to 0 (keep all)**. A positive value in Analytics settings explicitly enables irreversible removal of older events in batches of 500. No retention policy is enabled automatically.
+- Statistics have a **10-second server-side cache** and a **3-second query budget** on MariaDB (or the MySQL execution-time hint). Query failures remain errors, not empty statistics. Whole HTTP requests are still governed by PHP/web-server limits.
+- ZIP and Docker packaging reject symlinks, manifest traversal, special files and unexpected files under runtime directories. The ZIP contains an explicit runtime file list and manifest assets only.
+- Docker backups now live under `/var/backups/omongstat` with a private parent directory. Old `.omongstat.stage.*.previous` backups are moved there during deployment. Backups are not deleted automatically; use a persistent volume for this path if they must survive container replacement.
+- Docker deployment uses `root:www-data` ownership, directory mode 750 and file mode 640. WordPress cannot directly edit these files; use the deployment script for updates. A writable parent plugins directory still permits replacement by its owner: full isolation requires a read-only container mount and a separate deployment path. ZIP installations retain WordPress's normal ownership policy.
+- Vite binds to loopback with CORS disabled and a restricted host configuration. Do not expose it through a public proxy or override its binding for production.
+
+### Front-proxy configuration still required
+
+The plugin cannot change Cloudflare or the host's Nginx configuration. Adapt [the Nginx example](../config/nginx-omongstat.conf.example) to the existing proxy, validate with `nginx -t`, and apply it through your infrastructure deployment. Apply rate/body-size limits and cache bypass to both pretty REST URLs and `?rest_route=` requests in Cloudflare as well. Do not broadly rewrite the site's existing upload limits.
+
+### Security regression checks
+
+```sh
+node tests/package-security.test.mjs
+python3 tests/archive-security.py
+python3 tests/deployment.py
+```
+
+The WordPress integration suite also covers foreign origins, referrer scrubbing, atomic concurrent rate limits, resumable cleanup, and opt-in retention. Its workers and fixtures are isolated from the existing event table.

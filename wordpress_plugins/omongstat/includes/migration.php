@@ -11,7 +11,7 @@ function omongstat_maybe_migrate(): bool
     $table = omongstat_table_name();
     // A database lock also protects concurrent requests during an upgrade.
     $lock = 'omongstat_' . substr(hash('sha256', DB_NAME . $table), 0, 40);
-    if ((int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 10)', $lock)) !== 1) {
+    if ((int) $wpdb->get_var($wpdb->prepare('SELECT GET_LOCK(%s, 0)', $lock)) !== 1) {
         return false;
     }
     try {
@@ -26,12 +26,24 @@ function omongstat_maybe_migrate(): bool
             throw new RuntimeException($wpdb->last_error);
         }
         omongstat_verify_schema($table);
-        omongstat_backfill_technology($table);
+        $limits = omongstat_limits_table();
+        $collate = $wpdb->get_charset_collate();
+        omongstat_migration_query("CREATE TABLE IF NOT EXISTS `$limits` (
+            bucket char(64) NOT NULL PRIMARY KEY,
+            hits int unsigned NOT NULL DEFAULT 0,
+            expires_at bigint unsigned NOT NULL,
+            KEY expires_at (expires_at)
+        ) ENGINE=InnoDB $collate");
+        update_option(omongstat_state_key('backfill_cursor'), 0, false);
+        update_option(omongstat_state_key('backfill_complete'), false, false);
+        delete_transient(omongstat_state_key('upgrade_retry'));
+        omongstat_schedule_maintenance();
 
         update_option('omongstat_schema_version', OMONSTAT_SCHEMA_VERSION, false);
         return true;
     } catch (Throwable $error) {
-        error_log('OmongStat migration: ' . $error->getMessage());
+        omongstat_log_failure('migration', $error->getMessage());
+        set_transient(omongstat_state_key('upgrade_retry'), 1, 300);
         return false;
     } finally {
         $wpdb->get_var($wpdb->prepare('SELECT RELEASE_LOCK(%s)', $lock));
@@ -143,36 +155,38 @@ function omongstat_verify_schema(string $table): void
     }
 }
 
-function omongstat_backfill_technology(string $table): void
+function omongstat_backfill_technology(string $table): bool
 {
     global $wpdb;
 
-    // Classify legacy rows in bounded batches rather than loading the event table.
-    $last_id = 0;
-    do {
-        $rows = $wpdb->get_results(
-            $wpdb->prepare(
-                "SELECT id, user_agent FROM `$table` WHERE id > %d AND browser = 'Unknown' AND user_agent IS NOT NULL ORDER BY id LIMIT 250",
-                $last_id,
-            ),
-            ARRAY_A,
-        );
-        if ($wpdb->last_error) {
+    $last_id = (int) get_option(omongstat_state_key('backfill_cursor'), 0);
+    $rows = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT id, user_agent, referrer, browser FROM `$table` WHERE id > %d ORDER BY id LIMIT 250",
+            $last_id,
+        ),
+        ARRAY_A,
+    );
+    if ($wpdb->last_error) {
+        throw new RuntimeException($wpdb->last_error);
+    }
+    foreach ($rows as $row) {
+        $updates = [
+            'referrer' =>
+                $row['referrer'] === null ? null : omongstat_clean_referrer($row['referrer']),
+        ];
+        $formats = ['%s'];
+        if ($row['browser'] === 'Unknown' && $row['user_agent'] !== null) {
+            $updates = array_merge($updates, omongstat_technology($row['user_agent']));
+            $formats = array_merge($formats, ['%s', '%s', '%s', '%d']);
+        }
+        if ($wpdb->update($table, $updates, ['id' => $row['id']], $formats, ['%d']) === false) {
             throw new RuntimeException($wpdb->last_error);
         }
-        foreach ($rows as $row) {
-            if (
-                $wpdb->update(
-                    $table,
-                    omongstat_technology($row['user_agent']),
-                    ['id' => $row['id']],
-                    ['%s', '%s', '%s', '%d'],
-                    ['%d'],
-                ) === false
-            ) {
-                throw new RuntimeException($wpdb->last_error);
-            }
-            $last_id = (int) $row['id'];
-        }
-    } while (count($rows) === 250);
+        $last_id = (int) $row['id'];
+    }
+    update_option(omongstat_state_key('backfill_cursor'), $last_id, false);
+    $complete = count($rows) < 250;
+    update_option(omongstat_state_key('backfill_complete'), $complete, false);
+    return $complete;
 }

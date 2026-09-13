@@ -51,9 +51,7 @@ function omongstat_parse_log(string $line, bool $trust_ip = false): ?array
             'post_id' => 0,
             'path' => $path,
             'referrer' =>
-                $referrer === '-'
-                    ? null
-                    : esc_url_raw(substr($referrer, 0, 4096), ['http', 'https']),
+                $referrer === '-' ? null : omongstat_clean_referrer(substr($referrer, 0, 4096)),
             'visitor_id' => null,
             'session_id' => null,
             'ip_hash' =>
@@ -132,7 +130,7 @@ function omongstat_import_batch(array &$batch, array &$counts, bool $dry_run, st
         if (!$dry_run) {
             $wpdb->query('ROLLBACK');
         }
-        error_log('OmongStat import DB error: ' . $error->getMessage());
+        omongstat_log_failure('import batch', $error->getMessage());
         $counts['errors'] += count($batch);
     }
     $batch = [];

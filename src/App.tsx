@@ -103,7 +103,7 @@ export default function App() {
             Historical events without identifiers are excluded from visitor and session counts. Bot
             detection is an estimate based on the User-Agent.
           </p>
-          <TrafficChart rows={data.timeseries} />
+          <TrafficChart rows={data.timeseries}/>
           <div className="omongstat-grid">
             <Distribution title="Popular paths" rows={data.pages} />
             <Distribution

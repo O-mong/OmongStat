@@ -1,4 +1,8 @@
 <?php
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit();
+}
 // Run in a disposable PHP process; existing plugin hooks are disabled only for this process.
 $GLOBALS['wp_filter']['option_active_plugins'][10][] = [
     'function' => fn() => [],
@@ -26,6 +30,7 @@ add_filter(
     2,
 );
 require dirname(__DIR__) . '/wordpress_plugins/omongstat/omongstat.php';
+add_filter('pre_schedule_event', fn() => false);
 $checks = 0;
 function check($condition, $message)
 {
@@ -185,7 +190,85 @@ try {
     );
     check($imported['occurred_at'] === '2026-09-12 03:30:00', 'log timestamps normalized to UTC');
     unlink($file);
+    check(
+        omongstat_clean_referrer('https://user:password@example.org/path?token=secret#private') ===
+            'https://example.org/path',
+        'referrer credentials, query and fragment removed',
+    );
+    $origin_request = new WP_REST_Request('POST', '/omongstat/v1/collect');
+    $origin_request->set_header('Origin', home_url());
+    check(omongstat_check_origin($origin_request) === null, 'same-origin collection allowed');
+    $origin_request->set_header('Origin', 'https://untrusted.example');
+    check(
+        omongstat_check_origin($origin_request)->get_error_data()['status'] === 403,
+        'foreign origin rejected',
+    );
+    $origin_request->set_header('Origin', 'null');
+    check(
+        omongstat_check_origin($origin_request)->get_error_data()['status'] === 403,
+        'opaque origin rejected',
+    );
+    check(!omongstat_safe_asset('../omongstat.php'), 'manifest traversal rejected');
+    check(!omongstat_safe_asset('/etc/passwd'), 'manifest absolute path rejected');
+    $wpdb->query('DELETE FROM `' . omongstat_limits_table() . '`');
+    $rate_policy = fn() => ['site' => 100, 'ip' => 2];
+    add_filter('omongstat_rate_limits', $rate_policy);
+    check(omongstat_check_rate_limit() === null, 'first request inside IP budget');
+    check(omongstat_check_rate_limit() === null, 'second request inside IP budget');
+    check(omongstat_check_rate_limit()->get_error_data()['status'] === 429, 'IP budget enforced');
+    $limited_response = request_event($payload);
+    check(
+        $limited_response->get_status() === 429 &&
+            isset($limited_response->get_headers()['Retry-After']),
+        'rate-limited REST response includes retry delay',
+    );
+    remove_filter('omongstat_rate_limits', $rate_policy);
+    $wpdb->query('DELETE FROM `' . omongstat_limits_table() . '`');
+    $rate_policy = fn() => ['site' => 1, 'ip' => 100];
+    add_filter('omongstat_rate_limits', $rate_policy);
+    check(omongstat_check_rate_limit() === null, 'site budget accepts first request');
+    $_SERVER['HTTP_CF_CONNECTING_IP'] = '203.0.113.43';
+    check(
+        omongstat_check_rate_limit()->get_error_data()['status'] === 429,
+        'site budget spans different IPs',
+    );
+    $_SERVER['HTTP_CF_CONNECTING_IP'] = '203.0.113.42';
+    remove_filter('omongstat_rate_limits', $rate_policy);
+    $wpdb->query('DELETE FROM `' . omongstat_limits_table() . '`');
+    $workers = [];
+    for ($index = 0; $index < 8; $index++) {
+        $process = proc_open(
+            [PHP_BINARY, __DIR__ . '/rate-worker.php', $wpdb->prefix],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes,
+        );
+        if (!is_resource($process)) {
+            throw new RuntimeException('Cannot start rate test worker.');
+        }
+        $workers[] = [$process, $pipes];
+    }
+    $allowed = 0;
+    foreach ($workers as [$process, $pipes]) {
+        $output = trim(stream_get_contents($pipes[1]));
+        $errors = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        if (proc_close($process) !== 0 || !in_array($output, ['allowed', '429'], true)) {
+            throw new RuntimeException('Rate worker failed: ' . $errors);
+        }
+        if ($output === 'allowed') {
+            $allowed++;
+        }
+    }
+    check($allowed <= 2, 'concurrent requests cannot exceed the IP budget');
     // Simulate an unavailable table without altering any live table.
+    $wpdb->query(
+        'CREATE TABLE `' .
+            $wpdb->prefix .
+            'missing_omongstat_limits` LIKE `' .
+            omongstat_limits_table() .
+            '`',
+    );
     $wpdb->prefix .= 'missing_';
     $wpdb->suppress_errors(true);
     check(request_event($payload)->get_status() === 500, 'DB write failure returns 500');
@@ -217,6 +300,7 @@ try {
     ]);
     $schema = 0;
     check(omongstat_maybe_migrate(), 'upgrade original six-column schema');
+    omongstat_backfill_technology($legacy_table);
     $legacy = $wpdb->get_row("SELECT * FROM `$legacy_table`", ARRAY_A);
     check(
         $legacy['path'] === '/legacy/' &&
@@ -236,9 +320,67 @@ try {
         $wpdb->get_var("SELECT occured_at FROM `$legacy_table`") === '2024-01-01 00:00:00',
         'conflicting legacy timestamp is retained',
     );
+    $schema = OMONSTAT_SCHEMA_VERSION;
+    for ($index = 0; $index < 251; $index++) {
+        $wpdb->insert($legacy_table, [
+            'occurred_at' => '2020-01-01 00:00:00',
+            'path' => '/batch/',
+            'referrer' => 'https://user:secret@example.org/path?token=secret#private',
+        ]);
+    }
+    update_option(omongstat_state_key('backfill_cursor'), 0, false);
+    update_option(omongstat_state_key('backfill_complete'), false, false);
+    check(!omongstat_backfill_technology($legacy_table), 'backfill yields after 250 rows');
+    check(
+        (int) get_option(omongstat_state_key('backfill_cursor')) === 250,
+        'backfill saves its cursor',
+    );
+    check(omongstat_backfill_technology($legacy_table), 'backfill resumes and completes');
+    check(
+        (int) $wpdb->get_var(
+            "SELECT COUNT(*) FROM `$legacy_table` WHERE referrer LIKE '%secret%'",
+        ) === 0,
+        'background scrub removes stored URL secrets',
+    );
+    $before_retention = (int) $wpdb->get_var("SELECT COUNT(*) FROM `$legacy_table`");
+    $retention = fn() => '0';
+    add_filter('pre_option_omongstat_retention_days', $retention);
+    omongstat_run_maintenance();
+    check(
+        (int) $wpdb->get_var("SELECT COUNT(*) FROM `$legacy_table`") === $before_retention,
+        'default retention preserves events',
+    );
+    remove_filter('pre_option_omongstat_retention_days', $retention);
+    $retention = fn() => 1;
+    add_filter('pre_option_omongstat_retention_days', $retention);
+    omongstat_run_maintenance();
+    check(
+        (int) $wpdb->get_var("SELECT COUNT(*) FROM `$legacy_table`") === 0,
+        'explicit retention prunes expired events',
+    );
+    remove_filter('pre_option_omongstat_retention_days', $retention);
     echo "SUCCESS: $checks checks\n";
 } finally {
     // Only this run's newly created fixture is removed; never the existing wp_omongstat table.
     $wpdb->query("DROP TABLE IF EXISTS `$table`");
     $wpdb->query("DROP TABLE IF EXISTS `$legacy_table`");
+    foreach ([$table, $legacy_table] as $fixture) {
+        $wpdb->query("DROP TABLE IF EXISTS `{$fixture}_limits`");
+        $state = 'omongstat_' . substr(hash('sha256', $fixture), 0, 12) . '_';
+        foreach (['backfill_cursor', 'backfill_complete'] as $name) {
+            delete_option($state . $name);
+        }
+        delete_transient($state . 'upgrade_retry');
+    }
+    $missing_limits = str_replace(
+        'omongstat',
+        'missing_omongstat',
+        substr($table, strrpos($table, '_') + 1),
+    );
+    $wpdb->query(
+        'DROP TABLE IF EXISTS `' .
+            substr($table, 0, strrpos($table, '_') + 1) .
+            $missing_limits .
+            '_limits`',
+    );
 }

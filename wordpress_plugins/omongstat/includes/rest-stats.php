@@ -74,6 +74,14 @@ function omongstat_stats_query(string $sql): array
 {
     global $wpdb;
 
+    // Bound expensive admin queries independently of the PHP request timeout.
+    static $mariadb = null;
+    if ($mariadb === null) {
+        $mariadb = stripos((string) $wpdb->get_var('SELECT VERSION()'), 'MariaDB') !== false;
+    }
+    $sql = $mariadb
+        ? 'SET STATEMENT max_statement_time=3 FOR ' . $sql
+        : preg_replace('/^SELECT\s/i', 'SELECT /*+ MAX_EXECUTION_TIME(3000) */ ', $sql, 1);
     $rows = $wpdb->get_results($sql, ARRAY_A);
     if ($wpdb->last_error) {
         throw new RuntimeException($wpdb->last_error);
@@ -148,6 +156,8 @@ function omongstat_stats_recent(string $where): array
     );
 
     foreach ($rows as &$row) {
+        $row['referrer'] =
+            $row['referrer'] === null ? null : omongstat_clean_referrer($row['referrer']);
         $time = new DateTimeImmutable($row['occurred_at'], new DateTimeZone('UTC'));
         $row['occurred_at'] = $time->format('Y-m-d\TH:i:s\Z');
         $row['occurred_at_local'] = $time->setTimezone(wp_timezone())->format('Y-m-d H:i:s');
@@ -191,7 +201,7 @@ function omongstat_stats_distribution(string $name, string $where): array
     $columns = ['pages' => 'path', 'referrers' => 'referrer', 'countries' => 'country_code'];
     $column = $columns[$name];
 
-    return omongstat_stats_query(
+    $rows = omongstat_stats_query(
         "SELECT COALESCE(NULLIF($column, ''), 'Unknown') AS label, COUNT(*) AS count
          FROM `$table`
          WHERE $where
@@ -199,6 +209,21 @@ function omongstat_stats_distribution(string $name, string $where): array
          ORDER BY count DESC, label
          LIMIT 50",
     );
+    if ($name !== 'referrers') {
+        return $rows;
+    }
+    // Old rows may still be waiting for background cleanup.
+    $counts = [];
+    foreach ($rows as $row) {
+        $label = omongstat_clean_referrer($row['label']) ?: 'Unknown';
+        $counts[$label] = ($counts[$label] ?? 0) + (int) $row['count'];
+    }
+    arsort($counts);
+    $result = [];
+    foreach ($counts as $label => $count) {
+        $result[] = ['label' => $label, 'count' => $count];
+    }
+    return $result;
 }
 
 function omongstat_stats($request)
@@ -212,6 +237,13 @@ function omongstat_stats($request)
     $where = omongstat_stats_where($start, $end);
     $name = basename($request->get_route());
 
+    $cache_key =
+        'omongstat_stats_' . md5(OMONSTAT_VERSION . omongstat_table_name() . $name . $where);
+    $cached = get_transient($cache_key);
+    if (is_array($cached)) {
+        return new WP_REST_Response($cached, 200);
+    }
+
     try {
         $result = match ($name) {
             'summary' => omongstat_stats_summary($where),
@@ -220,9 +252,10 @@ function omongstat_stats($request)
             'technology' => omongstat_stats_technology($where),
             default => omongstat_stats_distribution($name, $where),
         };
+        set_transient($cache_key, $result, 10);
         return new WP_REST_Response($result, 200);
     } catch (Throwable $error) {
-        error_log('OmongStat stats DB error: ' . $error->getMessage());
+        omongstat_log_failure('stats query', $error->getMessage());
         return new WP_Error(
             'omongstat_db_error',
             'Statistics query failed. Check the server log.',
