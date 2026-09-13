@@ -42,6 +42,9 @@ add_filter(
         if (str_starts_with($request->get_route(), '/omongstat/v1/')) {
             $response->header('Cache-Control', 'no-store, private, max-age=0');
             $response->header('Pragma', 'no-cache');
+            if ($response->get_status() === 429) {
+                $response->header('Retry-After', (string) (60 - (time() % 60)));
+            }
         }
         return $response;
     },
@@ -153,11 +156,19 @@ function omongstat_insert_event(array $event)
 {
     global $wpdb;
     $integers = ['post_id', 'screen_width', 'screen_height', 'is_bot'];
-    return $wpdb->insert(
-        omongstat_table_name(),
-        $event,
-        array_map(fn($key) => in_array($key, $integers, true) ? '%d' : '%s', array_keys($event)),
-    );
+    $previous = $wpdb->suppress_errors(true);
+    try {
+        return $wpdb->insert(
+            omongstat_table_name(),
+            $event,
+            array_map(
+                fn($key) => in_array($key, $integers, true) ? '%d' : '%s',
+                array_keys($event),
+            ),
+        );
+    } finally {
+        $wpdb->suppress_errors($previous);
+    }
 }
 
 function omongstat_validate_payload($data): ?WP_Error
@@ -205,13 +216,18 @@ function omongstat_collect(WP_REST_Request $request)
     if (strlen($request->get_body()) > 16384) {
         return new WP_Error('omongstat_payload_large', 'Payload too large.', ['status' => 413]);
     }
+    $security_error = omongstat_check_origin($request) ?? omongstat_check_rate_limit();
+    if ($security_error) {
+        return $security_error;
+    }
+
     $data = $request->get_json_params();
     $validation_error = omongstat_validate_payload($data);
     if ($validation_error) {
         return $validation_error;
     }
 
-    $referrer = esc_url_raw($data['referrer'], ['http', 'https']);
+    $referrer = omongstat_clean_referrer($data['referrer']);
     $ua = substr(sanitize_text_field($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 4096);
     $event = array_merge(
         [
@@ -233,7 +249,7 @@ function omongstat_collect(WP_REST_Request $request)
         omongstat_technology($ua),
     );
     if (omongstat_insert_event($event) === false) {
-        error_log('OmongStat DB error: ' . $wpdb->last_error);
+        omongstat_log_failure('event insert', $wpdb->last_error);
         return new WP_Error('omongstat_db_error', 'Failed to save analytics event.', [
             'status' => 500,
         ]);

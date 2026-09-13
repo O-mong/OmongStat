@@ -1,4 +1,8 @@
 <?php
+if (PHP_SAPI !== 'cli') {
+    http_response_code(403);
+    exit();
+}
 // Execute with php inside wordpress-web after deployment. Removes only its own synthetic event.
 require '/var/www/html/wp-load.php';
 function smoke_check($ok, $message)
@@ -8,10 +12,10 @@ function smoke_check($ok, $message)
     }
     echo "PASS $message\n";
 }
-function local_http(string $path, ?array $payload = null): array
+function local_http(string $path, ?array $payload = null, array $extra_headers = []): array
 {
     $curl = curl_init('http://127.0.0.1' . $path);
-    $headers = ['Host: ' . wp_parse_url(home_url('/'), PHP_URL_HOST)];
+    $headers = array_merge(['Host: ' . wp_parse_url(home_url('/'), PHP_URL_HOST)], $extra_headers);
     if ($payload !== null) {
         $headers[] = 'Content-Type: application/json';
         curl_setopt($curl, CURLOPT_POSTFIELDS, json_encode($payload));
@@ -94,6 +98,14 @@ try {
         (int) $wpdb->get_var("SELECT COUNT(*) FROM `$table`") >= $before + 1,
         'DB count increases after HTTP collection',
     );
+    [$status] = local_http($collect_path, $payload, ['Origin: https://untrusted.example']);
+    smoke_check($status === 403, 'HTTP foreign origin is blocked');
+    $public_origin = 'https://' . wp_parse_url(home_url('/'), PHP_URL_HOST);
+    [$status] = local_http($collect_path, $payload, [
+        'Origin: ' . $public_origin,
+        'X-Forwarded-Proto: https',
+    ]);
+    smoke_check($status === 204, 'HTTPS proxy origin remains compatible');
     $payload['path'] = 'https://outside.example/';
     [$status] = local_http($collect_path, $payload);
     smoke_check($status === 400, 'real HTTP invalid path returns 400');

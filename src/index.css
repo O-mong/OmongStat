@@ -51,26 +51,6 @@
   background: #fff;
   padding: 16px;
 }
-#omongstat-root .omongstat-chart {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-  overflow-x: auto;
-  min-height: 170px;
-}
-#omongstat-root .omongstat-chart > div {
-  min-width: 32px;
-  flex: 1;
-  text-align: center;
-}
-#omongstat-root .omongstat-chart span {
-  display: block;
-  background: #2271b1;
-  border-radius: 3px 3px 0 0;
-}
-#omongstat-root small {
-  font-size: 10px;
-}
 #omongstat-root .omongstat-scroll {
   overflow: auto;
 }

@@ -27,6 +27,20 @@ __pycache__/
 !.env.example
 !.env.*.example
 
+# Private operational files (publish sanitized .example templates instead)
+/config/local/
+/docs/private/
+/backups/
+*.sql.gz
+*.sql.bz2
+*.sql.xz
+*.dump
+*.log.*
+*.pem
+*.key
+*.p12
+*.pfx
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -38,3 +52,4 @@ __pycache__/
 *.sln
 *.sw?
 PROCEDURE.md
+*deploy-plugin.sh

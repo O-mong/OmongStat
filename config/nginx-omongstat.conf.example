@@ -1,0 +1,29 @@
+# Place the maps and zone in the nginx http {} context.
+# Apply the final limit_req/client_max_body_size directives to the existing
+# WordPress proxy location; do not create a second proxy route or alter auth.
+map "$request_method:$uri:$arg_rest_route" $omongstat_collect_key {
+    default "";
+    ~^POST:/wp-json/omongstat/v1/collect/?(?:\:|$) $binary_remote_addr;
+    ~^POST:[^:]*:/omongstat/v1/collect/?$ $binary_remote_addr;
+}
+limit_req_zone $omongstat_collect_key zone=omongstat_collect:10m rate=5r/s;
+
+map "$uri:$arg_rest_route" $omongstat_skip_cache {
+    default 0;
+    ~^/wp-json/ 1;
+    ~^[^:]*:/ 1;
+}
+
+# In the existing WordPress proxy location:
+# limit_req zone=omongstat_collect burst=20 nodelay;
+# limit_req_status 429;
+# proxy_cache_bypass $omongstat_skip_cache;
+# proxy_no_cache $omongstat_skip_cache;
+#
+# In the REST location that serves the collect endpoint:
+# client_max_body_size 16k;
+# For ?rest_route= collection, also apply the 16 KB body-size rule in the WAF
+# or a dedicated, correctly configured front-controller location.
+#
+# Configure trusted real-IP proxies before using $binary_remote_addr as the
+# visitor identity. Never trust arbitrary X-Forwarded-For values.

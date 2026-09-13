@@ -64,9 +64,12 @@ Open **Analytics → Collection and data settings**.
 | Setting | Default |
 | --- | --- |
 | Exclude visits from logged-in administrators | Enabled |
+| Event retention in days | 0 (keep all events) |
 | Delete all analytics data when the plugin is uninstalled | Disabled |
 
 Deactivating the plugin keeps your data. Uninstalling also keeps it unless you enable the deletion setting.
+
+A positive retention value permanently removes events older than that many days in background batches.
 
 ## Installation help
 
@@ -78,3 +81,5 @@ Deactivating the plugin keeps your data. Uninstalling also keeps it unless you e
 | Requests fail behind a cache or CDN | Exclude `/wp-json/` and requests with `?rest_route=` from caching. |
 
 For Docker deployment, log imports, proxy configuration, and development commands, see [Development and operations](docs/DEVELOPMENT.md).
+
+See the [1.2.0 update notes](docs/updates/1.2.0.md) for security changes, upgrade behavior, and verification results.
